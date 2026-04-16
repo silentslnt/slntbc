@@ -68,20 +68,31 @@ class ServerCloner:
                 'emojis': emojis_data
             }
     
-    @staticmethod
-    async def apply_scraped_data(bot, scraped_data: dict, dest_guild: discord.Guild, ctx=None):
-        """
-        Apply scraped server data to destination guild
-        Uses human-like delays for safety
-        """
-        logger = CloneLogger(scraped_data['guild']['name'], dest_guild.name)
-        logger.log_start()
-        
-        role_map = {}
-        category_map = {}
-        channel_map = {}
-        
-        # Delete existing roles
+@staticmethod
+async def apply_scraped_data(bot, scraped_data, dest_guild, ctx=None, options=None):
+    """
+    Apply scraped server data to destination guild
+    Uses human-like delays for safety
+    """
+    if options is None:
+        options = {
+            'delete_channels': True,
+            'delete_roles': True,
+            'clone_roles': True,
+            'clone_channels': True,
+            'clone_emojis': True,
+            'clone_stickers': True
+        }
+    
+    logger = CloneLogger(scraped_data['guild']['name'], dest_guild.name)
+    logger.log_start()
+    
+    role_map = {}
+    category_map = {}
+    channel_map = {}
+    
+    # Delete existing roles
+    if options.get('delete_roles'):
         if ctx:
             await ctx.send("⏳ Clearing existing roles...")
         for role in dest_guild.roles:
@@ -92,8 +103,9 @@ class ServerCloner:
                 await human_delay(0.3, 0.8)
             except:
                 pass
-        
-        # Delete existing channels
+    
+    # Delete existing channels
+    if options.get('delete_channels'):
         if ctx:
             await ctx.send("⏳ Clearing existing channels...")
         for channel in dest_guild.channels:
@@ -102,8 +114,9 @@ class ServerCloner:
                 await human_delay(0.3, 0.8)
             except:
                 pass
-        
-        # Create roles
+    
+    # Create roles
+    if options.get('clone_roles'):
         if ctx:
             await ctx.send("⏳ Creating roles...")
         
@@ -131,8 +144,9 @@ class ServerCloner:
                 await human_delay(1.2, 2.5)
             except Exception as e:
                 logger.log_error(f"Failed to create role {role_data['name']}: {e}")
-        
-        # Create categories first
+    
+    # Create categories and channels
+    if options.get('clone_channels'):
         if ctx:
             await ctx.send("⏳ Creating categories...")
         
@@ -151,7 +165,6 @@ class ServerCloner:
             except Exception as e:
                 logger.log_error(f"Failed to create category: {e}")
         
-        # Create channels
         if ctx:
             await ctx.send("⏳ Creating channels...")
         
@@ -202,7 +215,7 @@ class ServerCloner:
                 channel_map[chan_data['id']] = new_chan
                 
                 # Apply permission overwrites
-                if 'permission_overwrites' in chan_data:
+                if 'permission_overwrites' in chan_data and options.get('clone_roles'):
                     for overwrite in chan_data['permission_overwrites']:
                         try:
                             # Role overwrite
@@ -223,13 +236,14 @@ class ServerCloner:
                 
             except Exception as e:
                 logger.log_error(f"Failed to create channel {chan_data.get('name', 'Unknown')}: {e}")
-        
-        # Clone emojis
+    
+    # Clone emojis
+    if options.get('clone_emojis'):
         if ctx:
             await ctx.send("⏳ Cloning emojis...")
         
         async with aiohttp.ClientSession() as session:
-            for emoji_data in scraped_data['emojis']:
+            for emoji_data in scraped_data.get('emojis', []):
                 try:
                     emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_data['id']}.{'gif' if emoji_data.get('animated') else 'png'}"
                     
@@ -243,12 +257,38 @@ class ServerCloner:
                             await human_delay(1.5, 3.0)
                 except Exception as e:
                     logger.log_error(f"Failed to clone emoji: {e}")
-        
-        logger.log_complete()
-        logger.save()
-        
+    
+    # Clone stickers
+    if options.get('clone_stickers') and 'stickers' in scraped_data:
         if ctx:
-            await ctx.send("✅ Clone complete!")
+            await ctx.send("⏳ Cloning stickers...")
+        
+        async with aiohttp.ClientSession() as session:
+            for sticker_data in scraped_data.get('stickers', []):
+                try:
+                    # Download sticker
+                    sticker_url = f"https://media.discordapp.net/stickers/{sticker_data['id']}.png"
+                    
+                    async with session.get(sticker_url) as resp:
+                        if resp.status == 200:
+                            sticker_bytes = await resp.read()
+                            
+                            # Create sticker
+                            await dest_guild.create_sticker(
+                                name=sticker_data['name'],
+                                description=sticker_data.get('description', ''),
+                                emoji=sticker_data.get('tags', '😀'),
+                                file=discord.File(io.BytesIO(sticker_bytes), filename='sticker.png')
+                            )
+                            await human_delay(1.5, 3.0)
+                except Exception as e:
+                    logger.log_error(f"Failed to clone sticker: {e}")
+    
+    logger.log_complete()
+    logger.save()
+    
+    if ctx:
+        await ctx.send("✅ Clone complete!")
     
     # Keep all the old methods for when bot IS in the server
     async def clone_server(self, ctx=None, options: Dict[str, bool] = None):

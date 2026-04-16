@@ -527,46 +527,103 @@ async def gettoken(ctx):
     Instructions on how to get your Discord user token
     """
     embed = discord.Embed(
-        title="🔑 How to Get Your User Token",
-        description="**⚠️ SECURITY WARNING: Never share your token with anyone! Use an alt account for scraping.**",
-        color=discord.Color.red()
+        title="🔑 How to Get Your Discord User Token",
+        description="**⚠️ CRITICAL SECURITY WARNING**\n\n"
+                    "• Never share your main account token\n"
+                    "• Always use an ALT account for scraping\n"
+                    "• Token = Full account access\n"
+                    "• Could result in account ban if detected",
+        color=discord.Color.red(),
+        timestamp=discord.utils.utcnow()
     )
     
     embed.add_field(
-        name="Step 1: Open Discord in Browser",
-        value="Go to https://discord.com in Chrome/Firefox",
+        name="📺 Video Tutorial",
+        value=(
+            "**Watch this complete guide:**\n"
+            "[Click Here to Watch on YouTube](https://www.youtube.com/watch?v=ECHX8iZeC6o)\n\n"
+            "The video shows exactly how to:\n"
+            "• Open Discord Developer Tools\n"
+            "• Extract your user token\n"
+            "• Use it safely"
+        ),
         inline=False
     )
     
     embed.add_field(
-        name="Step 2: Open Developer Tools",
-        value="Press **F12** or **Ctrl+Shift+I**",
+        name="🎯 Quick Summary",
+        value=(
+            "1️⃣ Open Discord in **browser** (discord.com)\n"
+            "2️⃣ Press **F12** to open DevTools\n"
+            "3️⃣ Go to **Console** tab\n"
+            "4️⃣ Run the token extraction code\n"
+            "5️⃣ Copy the output token"
+        ),
         inline=False
     )
     
     embed.add_field(
-        name="Step 3: Go to Console Tab",
-        value="Click the **Console** tab at the top",
+        name="💡 Usage",
+        value=(
+            "```\n!scrape <server_id> <your_token>```\n"
+            "**Important:** Delete your message immediately after sending!\n"
+            "The bot auto-deletes it, but be quick."
+        ),
         inline=False
     )
     
     embed.add_field(
-        name="Step 4: Paste This Code",
-        value="```js\n(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()\n```",
+        name="⚠️ Safety Tips",
+        value=(
+            "🔒 Use ALT account only\n"
+            "🔒 Never share token publicly\n"
+            "🔒 Token = password equivalent\n"
+            "🔒 Regenerate if compromised"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="Watch the video for full instructions", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def help(ctx):
+    """General bot help - redirects to help_clone"""
+    embed = discord.Embed(
+        title="🤖 Server Cloner Bot - Help",
+        description="This bot specializes in Discord server cloning and replication.",
+        color=discord.Color.green()
+    )
+    
+    embed.add_field(
+        name="📚 Full Command List",
+        value="Use `!help_clone` to see all available commands",
         inline=False
     )
     
     embed.add_field(
-        name="Step 5: Copy Token",
-        value="Copy the output (long string of text)\nIt will look like: `MTE2NzQ4ODk5...`",
+        name="🚀 Quick Start",
+        value=(
+            "**With bot in server:**\n"
+            "`!clone <server_id>`\n\n"
+            "**Without bot in server:**\n"
+            "1. Run `!gettoken` for instructions\n"
+            "2. Use `!scrape <server_id> <token>`"
+        ),
         inline=False
     )
     
     embed.add_field(
-        name="Usage",
-        value="Use it with: `!scrape <server_id> <your_token>`\n**Delete your message after sending!**",
+        name="🔗 Useful Links",
+        value=(
+            "[Token Tutorial](https://www.youtube.com/watch?v=ECHX8iZeC6o)\n"
+            "Need support? Contact bot owner."
+        ),
         inline=False
     )
+    
+    embed.set_footer(text=f"Prefix: ! • Type !help_clone for full list")
     
     await ctx.send(embed=embed)
 
@@ -574,62 +631,95 @@ async def gettoken(ctx):
 async def help_clone(ctx):
     """Show all cloner commands"""
     embed = discord.Embed(
-        title="🔧 Server Cloner - All Commands",
-        color=discord.Color.blue()
+        title="🔧 Discord Server Cloner Bot",
+        description="Complete server replication tool with advanced features",
+        color=discord.Color.blue(),
+        timestamp=discord.utils.utcnow()
     )
     
+    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
+    
     embed.add_field(
-        name="**Scraping (Bot NOT in Server)**",
+        name="🔍 Scraping (Bot NOT Required in Server)",
         value=(
-            "`!scrape <server_id> <user_token>` - Clone using your token\n"
-            "`!gettoken` - How to get your user token"
+            "```\n"
+            "!scrape <server_id> <user_token>\n"
+            "```\n"
+            "Clone servers without bot access\n"
+            "⚠️ Use alt account token for safety\n"
+            "⚠️ Message auto-deletes for security"
         ),
         inline=False
     )
     
     embed.add_field(
-        name="**Full Cloning (Bot IN Server)**",
+        name="📋 Full Cloning (Bot Required)",
         value=(
-            "`!clone <server_id>` - Clone to current server\n"
-            "`!newclone <server_id> Name` - Create new server & clone"
+            "```\n"
+            "!clone <server_id>\n"
+            "!newclone <server_id> <name>\n"
+            "```\n"
+            "`!clone` - Clone to current server\n"
+            "`!newclone` - Create new server & clone"
         ),
         inline=False
     )
     
     embed.add_field(
-        name="**Partial Cloning**",
+        name="🎯 Partial Cloning",
         value=(
-            "`!clone_roles <server_id>` - Clone only roles\n"
-            "`!clone_channels <server_id>` - Clone only channels\n"
-            "`!clone_emojis <server_id>` - Clone only emojis"
+            "```\n"
+            "!clone_roles <server_id>\n"
+            "!clone_channels <server_id>\n"
+            "!clone_emojis <server_id>\n"
+            "```\n"
+            "Clone specific elements only"
         ),
         inline=False
     )
     
     embed.add_field(
-        name="**Templates**",
+        name="💾 Template System",
         value=(
-            "`!save_template <server_id> Name` - Save as template\n"
-            "`!load_template filename.json` - Apply template\n"
-            "`!list_templates` - Show saved templates"
+            "```\n"
+            "!save_template <server_id> <name>\n"
+            "!load_template <filename.json>\n"
+            "!list_templates\n"
+            "```\n"
+            "Save & reuse server structures"
         ),
         inline=False
     )
     
     embed.add_field(
-        name="**Utility**",
+        name="🛠️ Utilities",
         value=(
-            "`!serverinfo [server_id]` - Get server stats\n"
-            "`!help_clone` - Show this message"
+            "```\n"
+            "!serverinfo [server_id]\n"
+            "!gettoken\n"
+            "!help_clone\n"
+            "```\n"
+            "`!serverinfo` - Server statistics\n"
+            "`!gettoken` - Get user token guide\n"
+            "`!help_clone` - Show this menu"
         ),
         inline=False
     )
     
     embed.add_field(
-        name="Features",
-        value="• Interactive clone options menu\n• Human-like delays for safety\n• Sticker cloning support\n• Detailed audit logs",
+        name="✨ Features",
+        value=(
+            "✅ Interactive options menu\n"
+            "✅ Human-like delays (anti-detection)\n"
+            "✅ Roles, Channels, Emojis, Stickers\n"
+            "✅ Permission overwrites preserved\n"
+            "✅ Webhook cloning support\n"
+            "✅ Detailed audit logs"
+        ),
         inline=False
     )
+    
+    embed.set_footer(text=f"Requested by {ctx.author.name}", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
     
     await ctx.send(embed=embed)
 
