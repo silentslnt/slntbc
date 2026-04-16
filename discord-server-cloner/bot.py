@@ -18,19 +18,56 @@ async def on_ready():
     print(f'📊 Servers: {len(bot.guilds)}')
     print('✅ Ready to clone')
 
-# === FULL CLONE COMMANDS ===
+# === SCRAPING COMMAND (DOESN'T NEED BOT IN SERVER) ===
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def scrape(ctx, server_id: int, user_token: str):
+    """
+    Clone a server using your Discord user token (bot doesn't need to be in it)
+    Usage: !scrape 123456789012345678 YOUR_USER_TOKEN
+    
+    ⚠️ Use an alt account token for safety
+    ⚠️ Delete the message after sending (contains your token)
+    """
+    
+    # Delete the command message for security (contains token)
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    
+    await ctx.send(f"🔍 Scraping server {server_id} with your token...")
+    await ctx.send(f"⏰ This will take a while (human-like delays for safety)...")
+    
+    try:
+        # Scrape the server data
+        scraped_data = await ServerCloner.scrape_server_with_token(server_id, user_token)
+        
+        await ctx.send(f"✅ Scraped **{scraped_data['guild']['name']}**")
+        await ctx.send(f"📊 Found: {len(scraped_data['roles'])} roles, {len(scraped_data['channels'])} channels, {len(scraped_data['emojis'])} emojis")
+        await ctx.send(f"🔄 Applying to current server...")
+        
+        # Apply to current guild
+        await ServerCloner.apply_scraped_data(bot, scraped_data, ctx.guild, ctx)
+        
+    except Exception as e:
+        await ctx.send(f"❌ Scraping failed: {str(e)}")
+        print(f"Scrape error: {e}")
+
+# === FULL CLONE COMMANDS (BOT MUST BE IN SERVER) ===
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clone(ctx, source_server_id: int):
     """
-    Full clone to current server
+    Full clone to current server (bot must be in source server)
     Usage: !clone 123456789012345678
     """
     source_guild = bot.get_guild(source_server_id)
     
     if not source_guild:
-        await ctx.send("❌ Bot is not in that server or invalid ID")
+        await ctx.send("❌ Bot is not in that server. Use `!scrape` instead with your user token.")
         return
     
     if not source_guild.me.guild_permissions.administrator:
@@ -58,7 +95,7 @@ async def newclone(ctx, source_server_id: int, *, new_server_name: str):
     source_guild = bot.get_guild(source_server_id)
     
     if not source_guild:
-        await ctx.send("❌ Bot is not in that server or invalid ID")
+        await ctx.send("❌ Bot is not in that server. Use `!scrape` with a user token instead.")
         return
     
     await ctx.send(f"🏗️ Creating **{new_server_name}**...")
@@ -90,7 +127,7 @@ async def clone_roles(ctx, source_server_id: int):
     """
     source_guild = bot.get_guild(source_server_id)
     if not source_guild:
-        await ctx.send("❌ Invalid server ID")
+        await ctx.send("❌ Invalid server ID or bot not in server")
         return
     
     await ctx.send("🔄 Cloning roles only...")
@@ -255,6 +292,55 @@ async def serverinfo(ctx, server_id: int = None):
     await ctx.send(embed=embed)
 
 @bot.command()
+async def gettoken(ctx):
+    """
+    Instructions on how to get your Discord user token
+    """
+    embed = discord.Embed(
+        title="🔑 How to Get Your User Token",
+        description="**⚠️ SECURITY WARNING: Never share your token with anyone! Use an alt account for scraping.**",
+        color=discord.Color.red()
+    )
+    
+    embed.add_field(
+        name="Step 1: Open Discord in Browser",
+        value="Go to https://discord.com in Chrome/Firefox",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Step 2: Open Developer Tools",
+        value="Press **F12** or **Ctrl+Shift+I**",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Step 3: Go to Console Tab",
+        value="Click the **Console** tab at the top",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Step 4: Paste This Code",
+        value="```js\n(webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()\n```",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Step 5: Copy Token",
+        value="Copy the output (long string of text)\nIt will look like: `MTE2NzQ4ODk5...`",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Usage",
+        value="Use it with: `!scrape <server_id> <your_token>`\n**Delete your message after sending!**",
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
+
+@bot.command()
 async def help_clone(ctx):
     """Show all cloner commands"""
     embed = discord.Embed(
@@ -263,7 +349,16 @@ async def help_clone(ctx):
     )
     
     embed.add_field(
-        name="**Full Cloning**",
+        name="**Scraping (Bot NOT in Server)**",
+        value=(
+            "`!scrape <server_id> <user_token>` - Clone using your token\n"
+            "`!gettoken` - How to get your user token"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="**Full Cloning (Bot IN Server)**",
         value=(
             "`!clone <server_id>` - Clone to current server\n"
             "`!newclone <server_id> Name` - Create new server & clone"
@@ -301,8 +396,8 @@ async def help_clone(ctx):
     )
     
     embed.add_field(
-        name="Requirements",
-        value="• Administrator permission required\n• Bot needs Admin in source server\n• Bot must be member of source server",
+        name="Safety Features",
+        value="• Human-like delays to avoid detection\n• Auto-deletes token messages\n• Detailed audit logs",
         inline=False
     )
     

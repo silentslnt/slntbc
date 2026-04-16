@@ -1,10 +1,16 @@
 import discord
+from discord.ext import commands
 import asyncio
 import aiohttp
 from typing import Dict, List, Optional
 from datetime import datetime
 import json
+import random
 from logger import CloneLogger
+
+async def human_delay(min_seconds=1.5, max_seconds=3.5):
+    """Simulate human-like delays to avoid detection"""
+    await asyncio.sleep(random.uniform(min_seconds, max_seconds))
 
 class ServerCloner:
     def __init__(self, bot, source_guild: discord.Guild, dest_guild: discord.Guild):
@@ -15,8 +21,236 @@ class ServerCloner:
         self.channel_map: Dict[int, discord.abc.GuildChannel] = {}
         self.category_map: Dict[int, discord.CategoryChannel] = {}
         self.emoji_map: Dict[str, discord.Emoji] = {}
-        self.logger = CloneLogger(source_guild.name, dest_guild.name)
+        self.logger = CloneLogger(source_guild.name if source_guild else "Unknown", dest_guild.name)
         
+    @staticmethod
+    async def scrape_server_with_token(server_id: int, user_token: str) -> dict:
+        """
+        Scrape server data using user token (for servers bot isn't in)
+        Uses human-like delays to avoid detection
+        """
+        headers = {
+            "Authorization": user_token,
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        base_url = "https://discord.com/api/v10"
+        
+        async with aiohttp.ClientSession(headers=headers) as session:
+            
+            # Get guild data
+            await human_delay(0.5, 1.0)
+            async with session.get(f"{base_url}/guilds/{server_id}") as resp:
+                if resp.status != 200:
+                    raise Exception(f"Failed to fetch guild: {resp.status} - {await resp.text()}")
+                guild_data = await resp.json()
+            
+            # Get roles
+            await human_delay(1.0, 2.0)
+            async with session.get(f"{base_url}/guilds/{server_id}/roles") as resp:
+                roles_data = await resp.json() if resp.status == 200 else []
+            
+            # Get channels
+            await human_delay(1.0, 2.0)
+            async with session.get(f"{base_url}/guilds/{server_id}/channels") as resp:
+                channels_data = await resp.json() if resp.status == 200 else []
+            
+            # Get emojis
+            await human_delay(1.0, 2.0)
+            async with session.get(f"{base_url}/guilds/{server_id}/emojis") as resp:
+                emojis_data = await resp.json() if resp.status == 200 else []
+            
+            return {
+                'guild': guild_data,
+                'roles': roles_data,
+                'channels': channels_data,
+                'emojis': emojis_data
+            }
+    
+    @staticmethod
+    async def apply_scraped_data(bot, scraped_data: dict, dest_guild: discord.Guild, ctx=None):
+        """
+        Apply scraped server data to destination guild
+        Uses human-like delays for safety
+        """
+        logger = CloneLogger(scraped_data['guild']['name'], dest_guild.name)
+        logger.log_start()
+        
+        role_map = {}
+        category_map = {}
+        channel_map = {}
+        
+        # Delete existing roles
+        if ctx:
+            await ctx.send("⏳ Clearing existing roles...")
+        for role in dest_guild.roles:
+            if role.name == "@everyone" or role.managed:
+                continue
+            try:
+                await role.delete()
+                await human_delay(0.3, 0.8)
+            except:
+                pass
+        
+        # Delete existing channels
+        if ctx:
+            await ctx.send("⏳ Clearing existing channels...")
+        for channel in dest_guild.channels:
+            try:
+                await channel.delete()
+                await human_delay(0.3, 0.8)
+            except:
+                pass
+        
+        # Create roles
+        if ctx:
+            await ctx.send("⏳ Creating roles...")
+        
+        roles_sorted = sorted(scraped_data['roles'], key=lambda r: r.get('position', 0), reverse=True)
+        
+        for role_data in roles_sorted:
+            if role_data['name'] == "@everyone":
+                perms = discord.Permissions(int(role_data['permissions']))
+                await dest_guild.default_role.edit(permissions=perms)
+                role_map[role_data['id']] = dest_guild.default_role
+                continue
+            
+            if role_data.get('managed'):
+                continue
+            
+            try:
+                new_role = await dest_guild.create_role(
+                    name=role_data['name'],
+                    permissions=discord.Permissions(int(role_data['permissions'])),
+                    color=discord.Color(role_data.get('color', 0)),
+                    hoist=role_data.get('hoist', False),
+                    mentionable=role_data.get('mentionable', False)
+                )
+                role_map[role_data['id']] = new_role
+                await human_delay(1.2, 2.5)
+            except Exception as e:
+                logger.log_error(f"Failed to create role {role_data['name']}: {e}")
+        
+        # Create categories first
+        if ctx:
+            await ctx.send("⏳ Creating categories...")
+        
+        categories = [c for c in scraped_data['channels'] if c['type'] == 4]
+        categories.sort(key=lambda c: c.get('position', 0))
+        
+        for cat_data in categories:
+            try:
+                new_cat = await dest_guild.create_category(
+                    name=cat_data['name'],
+                    position=cat_data.get('position', 0)
+                )
+                category_map[cat_data['id']] = new_cat
+                channel_map[cat_data['id']] = new_cat
+                await human_delay(1.0, 2.0)
+            except Exception as e:
+                logger.log_error(f"Failed to create category: {e}")
+        
+        # Create channels
+        if ctx:
+            await ctx.send("⏳ Creating channels...")
+        
+        channels = [c for c in scraped_data['channels'] if c['type'] != 4]
+        channels.sort(key=lambda c: c.get('position', 0))
+        
+        for chan_data in channels:
+            try:
+                category = category_map.get(chan_data.get('parent_id'))
+                
+                # Text channel (type 0)
+                if chan_data['type'] == 0:
+                    new_chan = await dest_guild.create_text_channel(
+                        name=chan_data['name'],
+                        topic=chan_data.get('topic'),
+                        nsfw=chan_data.get('nsfw', False),
+                        slowmode_delay=chan_data.get('rate_limit_per_user', 0),
+                        category=category
+                    )
+                
+                # Voice channel (type 2)
+                elif chan_data['type'] == 2:
+                    new_chan = await dest_guild.create_voice_channel(
+                        name=chan_data['name'],
+                        bitrate=min(chan_data.get('bitrate', 64000), dest_guild.bitrate_limit),
+                        user_limit=chan_data.get('user_limit', 0),
+                        category=category
+                    )
+                
+                # Forum channel (type 15)
+                elif chan_data['type'] == 15:
+                    new_chan = await dest_guild.create_forum_channel(
+                        name=chan_data['name'],
+                        topic=chan_data.get('topic'),
+                        category=category
+                    )
+                
+                # Stage channel (type 13)
+                elif chan_data['type'] == 13:
+                    new_chan = await dest_guild.create_stage_channel(
+                        name=chan_data['name'],
+                        category=category
+                    )
+                
+                else:
+                    continue
+                
+                channel_map[chan_data['id']] = new_chan
+                
+                # Apply permission overwrites
+                if 'permission_overwrites' in chan_data:
+                    for overwrite in chan_data['permission_overwrites']:
+                        try:
+                            # Role overwrite
+                            if overwrite['type'] == 0:
+                                target_role = role_map.get(int(overwrite['id']))
+                                if target_role:
+                                    allow = discord.Permissions(int(overwrite['allow']))
+                                    deny = discord.Permissions(int(overwrite['deny']))
+                                    await new_chan.set_permissions(
+                                        target_role,
+                                        overwrite=discord.PermissionOverwrite.from_pair(allow, deny)
+                                    )
+                                    await human_delay(0.5, 1.0)
+                        except Exception as e:
+                            logger.log_error(f"Failed to set permissions: {e}")
+                
+                await human_delay(1.0, 2.5)
+                
+            except Exception as e:
+                logger.log_error(f"Failed to create channel {chan_data.get('name', 'Unknown')}: {e}")
+        
+        # Clone emojis
+        if ctx:
+            await ctx.send("⏳ Cloning emojis...")
+        
+        async with aiohttp.ClientSession() as session:
+            for emoji_data in scraped_data['emojis']:
+                try:
+                    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_data['id']}.{'gif' if emoji_data.get('animated') else 'png'}"
+                    
+                    async with session.get(emoji_url) as resp:
+                        if resp.status == 200:
+                            image_bytes = await resp.read()
+                            await dest_guild.create_custom_emoji(
+                                name=emoji_data['name'],
+                                image=image_bytes
+                            )
+                            await human_delay(1.5, 3.0)
+                except Exception as e:
+                    logger.log_error(f"Failed to clone emoji: {e}")
+        
+        logger.log_complete()
+        logger.save()
+        
+        if ctx:
+            await ctx.send("✅ Clone complete!")
+    
+    # Keep all the old methods for when bot IS in the server
     async def clone_server(self, ctx=None, options: Dict[str, bool] = None):
         """Execute full or partial server clone"""
         
@@ -60,7 +294,7 @@ class ServerCloner:
                 await ctx.send(f"⏳ {step_name}...")
             self.logger.log_step(step_name)
             await step_func()
-            await asyncio.sleep(1)
+            await human_delay(0.8, 1.5)
         
         self.logger.log_complete()
         self.logger.save()
@@ -72,6 +306,7 @@ class ServerCloner:
             try:
                 await channel.delete()
                 deleted += 1
+                await human_delay(0.3, 0.7)
             except discord.Forbidden:
                 pass
         self.logger.log_action(f"Deleted {deleted} channels")
@@ -87,6 +322,7 @@ class ServerCloner:
             try:
                 await role.delete()
                 deleted += 1
+                await human_delay(0.3, 0.7)
             except discord.Forbidden:
                 pass
         self.logger.log_action(f"Deleted {deleted} roles")
@@ -115,7 +351,7 @@ class ServerCloner:
                 )
                 self.role_map[role.id] = new_role
                 created += 1
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.5)
                 
             except discord.Forbidden:
                 self.logger.log_error(f"Failed to create role: {role.name}")
@@ -136,7 +372,7 @@ class ServerCloner:
                 self.category_map[category.id] = new_category
                 self.channel_map[category.id] = new_category
                 created += 1
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.5)
                 
             except discord.Forbidden:
                 self.logger.log_error(f"Failed to create category: {category.name}")
@@ -194,7 +430,7 @@ class ServerCloner:
                 
                 self.channel_map[channel.id] = new_channel
                 created += 1
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.8)
                 
             except Exception as e:
                 self.logger.log_error(f"Error cloning {channel.name}: {e}")
@@ -227,7 +463,7 @@ class ServerCloner:
                     
                     await dest_channel.set_permissions(new_target, overwrite=overwrite)
                     perms_set += 1
-                    await asyncio.sleep(0.3)
+                    await human_delay(0.4, 0.9)
                     
             except Exception as e:
                 self.logger.log_error(f"Permission error on {dest_channel.name}: {e}")
@@ -239,7 +475,6 @@ class ServerCloner:
         created = 0
         skipped = 0
         
-        # Check emoji slots
         emoji_limit = self.dest.emoji_limit
         current_emojis = len(self.dest.emojis)
         
@@ -254,12 +489,10 @@ class ServerCloner:
                     break
                 
                 try:
-                    # Download emoji image
                     async with session.get(str(emoji.url)) as resp:
                         if resp.status == 200:
                             image_bytes = await resp.read()
                             
-                            # Create emoji in destination
                             new_emoji = await self.dest.create_custom_emoji(
                                 name=emoji.name,
                                 image=image_bytes,
@@ -268,7 +501,7 @@ class ServerCloner:
                             
                             self.emoji_map[emoji.name] = new_emoji
                             created += 1
-                            await asyncio.sleep(0.5)
+                            await human_delay(1.2, 2.5)
                             
                 except discord.Forbidden:
                     self.logger.log_error(f"Missing permissions to create emoji: {emoji.name}")
@@ -291,20 +524,17 @@ class ServerCloner:
                 continue
             
             try:
-                # Get webhooks from source
                 source_webhooks = await source_channel.webhooks()
                 
                 async with aiohttp.ClientSession() as session:
                     for webhook in source_webhooks:
                         try:
-                            # Download avatar if exists
                             avatar_bytes = None
                             if webhook.avatar:
                                 async with session.get(str(webhook.avatar.url)) as resp:
                                     if resp.status == 200:
                                         avatar_bytes = await resp.read()
                             
-                            # Create webhook in destination
                             await dest_channel.create_webhook(
                                 name=webhook.name or "Cloned Webhook",
                                 avatar=avatar_bytes,
@@ -312,7 +542,7 @@ class ServerCloner:
                             )
                             
                             created += 1
-                            await asyncio.sleep(0.5)
+                            await human_delay(1.0, 2.0)
                             
                         except discord.HTTPException as e:
                             self.logger.log_error(f"Failed to create webhook in {dest_channel.name}: {e}")
@@ -418,7 +648,7 @@ class ServerCloner:
                     hoist=role_data['hoist'],
                     mentionable=role_data['mentionable']
                 )
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.5)
             except Exception as e:
                 self.logger.log_error(f"Failed to create role from template: {e}")
         
@@ -434,7 +664,7 @@ class ServerCloner:
                     position=cat_data['position']
                 )
                 category_map[cat_data['id']] = new_cat
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.5)
             except Exception as e:
                 self.logger.log_error(f"Failed to create category from template: {e}")
         
@@ -473,7 +703,7 @@ class ServerCloner:
                         category=category
                     )
                 
-                await asyncio.sleep(0.5)
+                await human_delay(0.8, 1.8)
             except Exception as e:
                 self.logger.log_error(f"Failed to create channel from template: {e}")
         
