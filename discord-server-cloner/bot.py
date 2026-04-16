@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord.ui import Button, View
 import os
 from dotenv import load_dotenv
-from cloner import ServerCloner
+from cloner import ServerCloner, apply_scraped_data
 from template_manager import TemplateManager
 import asyncio
 import aiohttp
@@ -128,7 +128,7 @@ class CloneOptionsView(View):
                 scraped_data = await ServerCloner.scrape_server_with_token(self.server_id, self.user_token)
                 await self.ctx.send(f"✅ Scraped **{scraped_data['guild']['name']}**")
                 await self.ctx.send(f"📊 Found: {len(scraped_data['roles'])} roles, {len(scraped_data['channels'])} channels, {len(scraped_data['emojis'])} emojis")
-                await ServerCloner.apply_scraped_data(bot, scraped_data, self.ctx.guild, self.ctx, self.options)
+                await apply_scraped_data(bot, scraped_data, self.ctx.guild, self.ctx, self.options)
             else:
                 # Normal clone mode (bot in server)
                 cloner = ServerCloner(bot, self.source_guild, self.ctx.guild)
@@ -529,10 +529,7 @@ async def gettoken(ctx):
     embed = discord.Embed(
         title="🔑 How to Get Your Discord User Token",
         description="**⚠️ CRITICAL SECURITY WARNING**\n\n"
-                    "• Never share your main account token\n"
-                    "• Always use an ALT account for scraping\n"
-                    "• Token = Full account access\n"
-                    "• Could result in account ban if detected",
+                    "• Never share your account token to anyone\n",
         color=discord.Color.red(),
         timestamp=discord.utils.utcnow()
     )
@@ -554,10 +551,11 @@ async def gettoken(ctx):
         name="🎯 Quick Summary",
         value=(
             "1️⃣ Open Discord in **browser** (discord.com)\n"
-            "2️⃣ Press **F12** to open DevTools\n"
-            "3️⃣ Go to **Console** tab\n"
-            "4️⃣ Run the token extraction code\n"
-            "5️⃣ Copy the output token"
+            "2️⃣ Press the arrow on the top right\n"
+            "3️⃣ Go to **Application** tab\n"
+            "4️⃣ Press Local Storage\n"
+            "5️⃣ Press Filter and type token"
+            "6️⃣ Find where it says token and copy"
         ),
         inline=False
     )
@@ -572,16 +570,6 @@ async def gettoken(ctx):
         inline=False
     )
     
-    embed.add_field(
-        name="⚠️ Safety Tips",
-        value=(
-            "🔒 Use ALT account only\n"
-            "🔒 Never share token publicly\n"
-            "🔒 Token = password equivalent\n"
-            "🔒 Regenerate if compromised"
-        ),
-        inline=False
-    )
     
     embed.set_footer(text="Watch the video for full instructions", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
     
